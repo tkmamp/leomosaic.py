@@ -5,6 +5,25 @@ import numpy as np
 from os import listdir
 from os.path import isfile, join
 
+
+
+def calc_keypoints(im, m, n):
+        keypoints = np.zeros((m, n, 3))
+        h_px = int(im.height/m)
+        w_px = int(im.width/n)
+        w = 0
+        for i in range(n):
+            h = 0
+            for j in range(m):
+                for k in range(3):
+                    keypoints[j, i, k] = np.mean(im.__array__()[h:h+h_px, w:w+w_px, k])
+                h += h_px
+            w += w_px
+        return keypoints
+
+
+
+
 class BasicImage():
     def __init__(self, source=None) -> None:
         self.source = source
@@ -41,9 +60,13 @@ class MosaicTile(BasicImage):
         self.set_tile_mean_color()
         if target_res is not None:
             self.resize_im(target_res)
+        self.set_tile_color_keypoints()
 
     def set_tile_mean_color(self):
         self.mean_color = [np.mean(self.im.__array__()[:, :, i]) for i in range(3)]
+
+    def set_tile_color_keypoints(self):
+        self.mean_keypoints = calc_keypoints(self.im, 3, 3)
 
     def resize_im(self, target_res):
         self.im = self.im.resize(target_res)
@@ -62,7 +85,10 @@ class Mosaic(BasicImage):
         self.n_tiles_wh = None
     
     def set_mosaic_res(self, res):
+        if res == ():
+            res = (self.im.width, self.im.height)
         self.res_mosaic = res
+        self.im = self.im.resize(res)
 
     def set_source_dir(self, source_dir):
         self.source_dir = source_dir
@@ -71,13 +97,18 @@ class Mosaic(BasicImage):
         res_tiles = self.get_res_tiles()
         tiles = []
         tiles_mean_colors = []
+        tiles_mean_keypoints = []
         files = [f for f in listdir(self.source_dir) if isfile(join(self.source_dir, f))]
+        if not self.reuse_images:
+            assert(len(files)>=self.n_tiles_wh[0]*self.n_tiles_wh[1]), ''' not enough pictures!!11!!1 '''
         for f in files:
             t = MosaicTile(join(self.source_dir, f), res_tiles)
             tiles.append(t)
             tiles_mean_colors.append(np.array(t.mean_color))
+            tiles_mean_keypoints.append(t.mean_keypoints)
         self.tiles = tiles
-        self.tiles_mean_colors = tiles_mean_colors        
+        self.tiles_mean_colors = tiles_mean_colors
+        self.tiles_mean_keypoints = tiles_mean_keypoints
 
     def set_n_tiles_wh(self, n_tiles_wh):
         self.n_tiles_wh =n_tiles_wh
@@ -90,6 +121,7 @@ class Mosaic(BasicImage):
 
     def set_target_mean_colors(self):
         target_mean_colors = np.zeros((self.n_tiles_wh[1],  self.n_tiles_wh[0], 3))
+        target_keypoints = np.zeros((3, 3, self.n_tiles_wh[1],  self.n_tiles_wh[0], 3))
         w_px, h_px = self.get_res_tiles()
         n = 0
         im = self.im.__array__()
@@ -98,36 +130,54 @@ class Mosaic(BasicImage):
             for j in range(target_mean_colors.shape[1]):
                 for k in range(3):
                     target_mean_colors[i, j, k] = np.mean(im[n:n+h_px, m:m+w_px, k])
+                target_keypoints[:, :, i ,j, :] = calc_keypoints(Image.fromarray(im[n:n+h_px, m:m+w_px, :]), 3, 3)
                 m += w_px
             n += h_px
         self.target_mean_colors = target_mean_colors
+        self.target_keypoints = target_keypoints
 
     def color_dist(self, rgb1, rgb2):
-        return np.sqrt(np.sum(np.square(rgb1-rgb2)))
+        return np.linalg.norm(rgb1-rgb2)
 
-    def calc_color_dists(self, rgb):
-        return np.array([self.color_dist(rgb, self.tiles_mean_colors[i]) for i in range(len(self.tiles))])
+    def calc_color_dists(self, target_points, tiles_points, keypoints):
+        if keypoints:
+            return np.array([self.color_dist(target_points, tiles_points[i]) for i in range(len(tiles_points))])
+        else:
+            return np.array([self.color_dist(target_points, tiles_points[i]) for i in range(len(tiles_points))])
 
-    def get_min_color_dist_idx(self, rgb):
-        return  np.argmin(self.calc_color_dists(rgb))
+    def get_min_color_dist_idx(self, target_points, tiles_points, keypoints):
+        return  np.argmin(self.calc_color_dists(target_points, tiles_points, keypoints))
 
-    def set_mosaic(self):
+    def set_mosaic(self, keypoints=True):
         mosaic = np.zeros((self.res_mosaic[1], self.res_mosaic[0], 3))
         w_px, h_px = self.get_res_tiles()
         n = 0
+        if keypoints:
+            tiles_points = self.tiles_mean_keypoints.copy()
+        else:
+            tiles_points = self.tiles_mean_colors.copy()
+        tiles = self.tiles.copy()
+
         for i in range(self.n_tiles_wh[1]):
             m = 0
             for j in range(self.n_tiles_wh[0]):
-                f_idx = self.get_min_color_dist_idx(self.target_mean_colors[i, j, :])
-                mosaic[n:n+h_px, m:m+w_px, :] = self.tiles[f_idx].im.__array__()
+                if keypoints:
+                    f_idx = self.get_min_color_dist_idx(self.target_keypoints[:, :, i, j, :], tiles_points, keypoints)
+                else:
+                    f_idx = self.get_min_color_dist_idx(self.target_mean_colors[i, j, :], tiles_points, keypoints)
+                mosaic[n:n+h_px, m:m+w_px, :] = tiles[f_idx].im.__array__()
                 m+=w_px
+                if not self.reuse_images:
+                    tiles_points.pop(f_idx)
+                    tiles.pop(f_idx)
             n += h_px
         self.mosaic = Image.fromarray(mosaic.astype(np.uint8))
 
     def overlay_mosaic(self, alpha):
         self.blended_mosaic = Image.blend(self.mosaic, self.im.resize(self.res_mosaic), alpha)
 
-    def create_image_mosaic(self, target_image, target_resolution_wh, tile_source_dir, target_number_tiles_wh=[], overlay=0.):
+    def create_image_mosaic(self, target_image, tile_source_dir, reuse_images=False, target_resolution_wh=(), target_number_tiles_wh=(), overlay=0.):
+        self.reuse_images = reuse_images        
         self.load_file(target_image)
         self.set_mosaic_res(target_resolution_wh)
         self.set_source_dir(tile_source_dir)
