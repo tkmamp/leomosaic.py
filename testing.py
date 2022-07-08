@@ -1,15 +1,15 @@
-from src.imaging import BasicImage, MosaicTile, Mosaic
-from PIL import Image
-from os import listdir
-from os.path import isfile, join
+from src.imaging import Mosaic
 
 
 mymosaic = Mosaic()
-#target_im = "/data_partition/Sciebo/Bilder/Roadtrip21/20210705_181727.jpg"
-#source_dir = "/data_partition/Sciebo/Bilder/Roadtrip21/"
-target_im = "data/testset/2-format2020.jpg"
-source_dir = "data/testset/"
-w = 4000
-h = int(w*9/16)
-mymosaic.create_image_mosaic(target_im, source_dir, target_resolution_wh=(w, h), target_number_tiles_wh=(5, 5), overlay=0.5)
-mymosaic.blended_mosaic.show()
+target_im = "data/geschenk_leo/main.jpg" # load pics into that folder
+source_dir = "data/geschenk_leo/tiles/" # target image
+w = 14043  # 14043x9933 ist lt. internet die Auflösung für DIN A0, 300 dpi
+h = 9933 # int(w*3/4)
+w_tiles = 60 
+h_tiles = w_tiles #int(w_tiles*3/4)
+mymosaic.create_image_mosaic(target_im, source_dir, reuse_images=False, max_reuse=100, 
+                             target_resolution_wh=(w, h), target_number_tiles_wh=(w_tiles, h_tiles), 
+                             overlay=0.4, kshape=(5,5), desaturate=0.8)
+mymosaic.blended_mosaic.save(fp="C:\\Users\\Tobia\\Desktop\\demo.png") # save to this file
+print("ready")

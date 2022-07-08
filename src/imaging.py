@@ -1,6 +1,6 @@
 from turtle import color
 from xml.etree.ElementPath import find
-from PIL import Image
+from PIL import Image, ImageEnhance
 import numpy as np
 from os import listdir
 from os.path import isfile, join
@@ -55,18 +55,25 @@ class BasicImage():
  
 
 class MosaicTile(BasicImage):
-    def __init__(self, source, target_res=None) -> None:
+    def __init__(self, source, target_res=None, kshape=(3, 3), des=1) -> None:
         super().__init__(source)
         self.set_tile_mean_color()
+        self.kshape = kshape
+        self.desaturate = des
         if target_res is not None:
             self.resize_im(target_res)
+        self.desaturate_im()
         self.set_tile_color_keypoints()
 
     def set_tile_mean_color(self):
         self.mean_color = [np.mean(self.im.__array__()[:, :, i]) for i in range(3)]
 
     def set_tile_color_keypoints(self):
-        self.mean_keypoints = calc_keypoints(self.im, 3, 3)
+        self.mean_keypoints = calc_keypoints(self.im, self.kshape[0], self.kshape[1])
+
+    def desaturate_im(self):
+        conv = ImageEnhance.Color(self.im)
+        self.im = conv.enhance(self.desaturate)
 
     def resize_im(self, target_res):
         self.im = self.im.resize(target_res)
@@ -99,10 +106,14 @@ class Mosaic(BasicImage):
         tiles_mean_colors = []
         tiles_mean_keypoints = []
         files = [f for f in listdir(self.source_dir) if isfile(join(self.source_dir, f))]
+        print("setting up tiles")
         if not self.reuse_images:
-            assert(len(files)>=self.n_tiles_wh[0]*self.n_tiles_wh[1]), ''' not enough pictures!!11!!1 '''
+            if self.max_reuse < 0:
+                self.max_reuse = int(self.n_tiles_wh[0]*self.n_tiles_wh[1]/len(files)) + 1
+            self.n_used = np.zeros(len(files)).tolist()    
+            assert(len(files)*self.max_reuse>=self.n_tiles_wh[0]*self.n_tiles_wh[1]), ''' not enough pictures!!11!!1 '''
         for f in files:
-            t = MosaicTile(join(self.source_dir, f), res_tiles)
+            t = MosaicTile(join(self.source_dir, f), res_tiles, self.kshape, self.desaturate)
             tiles.append(t)
             tiles_mean_colors.append(np.array(t.mean_color))
             tiles_mean_keypoints.append(t.mean_keypoints)
@@ -121,16 +132,17 @@ class Mosaic(BasicImage):
 
     def set_target_mean_colors(self):
         target_mean_colors = np.zeros((self.n_tiles_wh[1],  self.n_tiles_wh[0], 3))
-        target_keypoints = np.zeros((3, 3, self.n_tiles_wh[1],  self.n_tiles_wh[0], 3))
+        target_keypoints = np.zeros((self.kshape[0], self.kshape[1], self.n_tiles_wh[1],  self.n_tiles_wh[0], 3))
         w_px, h_px = self.get_res_tiles()
         n = 0
         im = self.im.__array__()
+        print("analysing target image")
         for i in range(target_mean_colors.shape[0]):
             m = 0
             for j in range(target_mean_colors.shape[1]):
                 for k in range(3):
                     target_mean_colors[i, j, k] = np.mean(im[n:n+h_px, m:m+w_px, k])
-                target_keypoints[:, :, i ,j, :] = calc_keypoints(Image.fromarray(im[n:n+h_px, m:m+w_px, :]), 3, 3)
+                target_keypoints[:, :, i ,j, :] = calc_keypoints(Image.fromarray(im[n:n+h_px, m:m+w_px, :]), self.kshape[0], self.kshape[1])
                 m += w_px
             n += h_px
         self.target_mean_colors = target_mean_colors
@@ -157,27 +169,46 @@ class Mosaic(BasicImage):
         else:
             tiles_points = self.tiles_mean_colors.copy()
         tiles = self.tiles.copy()
-
+        print("rendering mosaic")
         for i in range(self.n_tiles_wh[1]):
-            m = 0
+            m = 0            
             for j in range(self.n_tiles_wh[0]):
                 if keypoints:
                     f_idx = self.get_min_color_dist_idx(self.target_keypoints[:, :, i, j, :], tiles_points, keypoints)
                 else:
                     f_idx = self.get_min_color_dist_idx(self.target_mean_colors[i, j, :], tiles_points, keypoints)
                 mosaic[n:n+h_px, m:m+w_px, :] = tiles[f_idx].im.__array__()
-                m+=w_px
+                m+=w_px                
                 if not self.reuse_images:
-                    tiles_points.pop(f_idx)
-                    tiles.pop(f_idx)
+                    if self.n_used[f_idx] >= self.max_reuse:
+                        tiles_points.pop(f_idx)
+                        tiles.pop(f_idx)
+                        self.n_used.pop(f_idx)
+                    else:
+                        self.n_used[f_idx] +=1
+               
             n += h_px
         self.mosaic = Image.fromarray(mosaic.astype(np.uint8))
 
     def overlay_mosaic(self, alpha):
         self.blended_mosaic = Image.blend(self.mosaic, self.im.resize(self.res_mosaic), alpha)
 
-    def create_image_mosaic(self, target_image, tile_source_dir, reuse_images=False, target_resolution_wh=(), target_number_tiles_wh=(), overlay=0.):
-        self.reuse_images = reuse_images        
+    def create_image_mosaic(self, target_image, tile_source_dir, reuse_images=False, max_reuse=1, target_resolution_wh=(), target_number_tiles_wh=(), overlay=0., kshape=(5, 5), desaturate=0.8):
+        ''' target image: image that will be constructed from tiles
+            tile_source_dir: folder with images for the tiles
+            reuse_images: True -> Images can be repeated unlimited  
+                          False -> Images can only be used "max_reuse" times
+            max_reuse: Int, if reuse_images is False, than this value determines how many times the images can be used (set to 1 for no re-usage)
+                       if set to -1, it will be determied automatically
+            target_resolution_wh: (Int, Int) width and height in px of the resulting mosaic
+            target_numer_tilse_wh: (Int, Int) number of tiles in width and height respectively
+            overlay: float [0, 1] blend the original image over the mosaic (cheat a little)
+            kshape: number of keypoints that are used to fit the tiles into place, normally default (5, 5) is enough
+            desaturate: float (0, 1] desaturate the tiles'''
+        self.kshape = kshape
+        self.reuse_images = reuse_images
+        self.max_reuse = max_reuse
+        self.desaturate = desaturate   
         self.load_file(target_image)
         self.set_mosaic_res(target_resolution_wh)
         self.set_source_dir(tile_source_dir)
