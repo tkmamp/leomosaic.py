@@ -109,8 +109,8 @@ class Mosaic(BasicImage):
         print("setting up tiles")
         if not self.reuse_images:
             if self.max_reuse < 0:
-                self.max_reuse = int(self.n_tiles_wh[0]*self.n_tiles_wh[1]/len(files)) + 1
-            self.n_used = np.zeros(len(files)).tolist()    
+                self.max_reuse = int(self.n_tiles_wh[0]*self.n_tiles_wh[1]/len(files)) - self.max_reuse
+            self.n_used = np.zeros(len(files)).tolist()
             assert(len(files)*self.max_reuse>=self.n_tiles_wh[0]*self.n_tiles_wh[1]), ''' not enough pictures!!11!!1 '''
         for f in files:
             t = MosaicTile(join(self.source_dir, f), res_tiles, self.kshape, self.desaturate)
@@ -190,10 +190,15 @@ class Mosaic(BasicImage):
             n += h_px
         self.mosaic = Image.fromarray(mosaic.astype(np.uint8))
 
-    def overlay_mosaic(self, alpha):
-        self.blended_mosaic = Image.blend(self.mosaic, self.im.resize(self.res_mosaic), alpha)
+    def enhance_im(self, enhance_by):
+        conv = ImageEnhance.Color(self.im)
+        self.im = conv.enhance(enhance_by)
 
-    def create_image_mosaic(self, target_image, tile_source_dir, reuse_images=False, max_reuse=1, target_resolution_wh=(), target_number_tiles_wh=(), overlay=0., kshape=(5, 5), desaturate=0.8):
+    def overlay_mosaic(self, alpha):                
+        self.blended_mosaic = Image.blend(self.mosaic, self.im.resize(self.res_mosaic), alpha)
+        
+
+    def create_image_mosaic(self, target_image, tile_source_dir, reuse_images=False, max_reuse=1, target_resolution_wh=(), target_number_tiles_wh=(), overlay=0., kshape=(5, 5), desaturate=0.8, enhance_target=1.):
         ''' target image: image that will be constructed from tiles
             tile_source_dir: folder with images for the tiles
             reuse_images: True -> Images can be repeated unlimited  
@@ -204,12 +209,14 @@ class Mosaic(BasicImage):
             target_numer_tilse_wh: (Int, Int) number of tiles in width and height respectively
             overlay: float [0, 1] blend the original image over the mosaic (cheat a little)
             kshape: number of keypoints that are used to fit the tiles into place, normally default (5, 5) is enough
-            desaturate: float (0, 1] desaturate the tiles'''
+            desaturate: float (0, 1] desaturate the tiles
+            enhance_target: float increase (>1) /decrease (<1) saturation of main image'''
         self.kshape = kshape
         self.reuse_images = reuse_images
         self.max_reuse = max_reuse
         self.desaturate = desaturate   
         self.load_file(target_image)
+        self.enhance_im(enhance_target)
         self.set_mosaic_res(target_resolution_wh)
         self.set_source_dir(tile_source_dir)
         self.set_n_tiles_wh(target_number_tiles_wh)
