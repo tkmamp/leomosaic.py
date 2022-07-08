@@ -129,4 +129,10 @@ dmypy.json
 .pyre/
 
 .vscode/
-data/
+data/testset/
+
+*.jpg
+*.JPG
+*.jpeg
+*.png
+*.webp
