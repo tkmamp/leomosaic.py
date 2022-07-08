@@ -198,7 +198,7 @@ class Mosaic(BasicImage):
         self.blended_mosaic = Image.blend(self.mosaic, self.im.resize(self.res_mosaic), alpha)
         
 
-    def create_image_mosaic(self, target_image, tile_source_dir, reuse_images=False, max_reuse=1, target_resolution_wh=(), target_number_tiles_wh=(), overlay=0., kshape=(5, 5), desaturate=0.8, enhance_target=1.):
+    def create_image_mosaic(self, target_image, tile_source_dir, reuse_images=False, max_reuse=1, target_resolution_wh=(), target_number_tiles_wh=(), overlay=0., kshape=(5, 5), desaturate_tiles=0.8, enhance_target=1.):
         ''' target image: image that will be constructed from tiles
             tile_source_dir: folder with images for the tiles
             reuse_images: True -> Images can be repeated unlimited  
@@ -214,7 +214,7 @@ class Mosaic(BasicImage):
         self.kshape = kshape
         self.reuse_images = reuse_images
         self.max_reuse = max_reuse
-        self.desaturate = desaturate   
+        self.desaturate = desaturate_tiles
         self.load_file(target_image)
         self.enhance_im(enhance_target)
         self.set_mosaic_res(target_resolution_wh)
