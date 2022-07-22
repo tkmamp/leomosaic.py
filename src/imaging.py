@@ -106,6 +106,7 @@ class Mosaic(BasicImage):
         tiles_mean_colors = []
         tiles_mean_keypoints = []
         files = [f for f in listdir(self.source_dir) if isfile(join(self.source_dir, f))]
+        print("found " + str(len(files)) + " pictures")
         print("setting up tiles")
         if not self.reuse_images:
             if self.max_reuse < 0:
@@ -169,6 +170,7 @@ class Mosaic(BasicImage):
         else:
             tiles_points = self.tiles_mean_colors.copy()
         tiles = self.tiles.copy()
+        n_used = self.n_used.copy()
         print("rendering mosaic")
         for i in range(self.n_tiles_wh[1]):
             m = 0            
@@ -180,15 +182,18 @@ class Mosaic(BasicImage):
                 mosaic[n:n+h_px, m:m+w_px, :] = tiles[f_idx].im.__array__()
                 m+=w_px                
                 if not self.reuse_images:
-                    if self.n_used[f_idx] >= self.max_reuse:
+                    if n_used[f_idx] >= self.max_reuse:
                         tiles_points.pop(f_idx)
                         tiles.pop(f_idx)
-                        self.n_used.pop(f_idx)
+                        n_used.pop(f_idx)
                     else:
-                        self.n_used[f_idx] +=1
+                        n_used[f_idx] +=1
                
             n += h_px
         self.mosaic = Image.fromarray(mosaic.astype(np.uint8))
+        # for i in range(len(tiles)):
+        #     if n_used[i] == 0:
+        #         print("did not use " + tiles[i].source)
 
     def enhance_im(self, enhance_by):
         conv = ImageEnhance.Color(self.im)
